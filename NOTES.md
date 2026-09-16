@@ -199,6 +199,39 @@ customer file actually caused.
    from the same Template Center to see if either breaks a different
    assumption (multi-choice-heavy content, different column set, etc.).
 
+## Using Hive Inspect (for the walkthrough's Hive-feedback section)
+
+Signed up for the Hive Inspect free trial and used the account for this
+exploration. Two things worth being direct about:
+
+- **Hive has its own native Spectora template importer** (Templates → Upload
+  → select "Spectora" as source → upload the same `.xls`/`.xlsx` export this
+  project targets). Tried it against the exact real InterNACHI Residential
+  file committed here. It does more than this project does in one respect —
+  it explicitly downloads and rehosts referenced images to Hive's own cloud
+  storage ("Downloading and uploading images to our secure cloud"), and has
+  an "Import cost estimates" option that carries Spectora's cost-estimate
+  ranges into recommendations, with an honest caveat that stock Spectora
+  templates default the same range on every comment and should be reviewed
+  afterward. Both are real fidelity wins this project explicitly punted on
+  (see "Known limitations").
+- **The import UI didn't reflect its own success.** After uploading, the
+  "Processing Your Template — this may take up to 5 minutes" spinner never
+  advanced, well past 5 minutes. Reloading the page showed the import had
+  actually succeeded — the new template was sitting in the list the whole
+  time. For a product whose core value proposition here is *replacing* what
+  this project builds, a stuck "are we done yet" state is the one thing to
+  get right — it's the exact trust problem this project's own "go further"
+  chose to solve for. Also hit two other stuck-loading states in the same
+  session (a template failing to open after being clicked in the sidebar
+  twice in a row; an inspection's "services" data never finishing loading
+  across multiple reloads, which left the Edit/Preview Reports actions doing
+  nothing visible) — no console errors in either case, just requests that
+  never resolved. Didn't fully complete the "publish a sample report"
+  walkthrough as a result; the demo inspection Hive seeds new accounts with
+  already shows a report in "Published" status, which is what's shown in the
+  video instead.
+
 ## How this was checked
 
 - `npm run check-import` runs the parser (no DB) against all three sample
@@ -241,8 +274,7 @@ Built in a single extended AI-pair-programming session (Claude Code):
 schema + migration, parser + sanitizer, server actions, editor/import UI,
 Supabase provisioning, Vercel deployment, Hive Inspect + Spectora trial
 signups, the real Spectora export and the two bug fixes it surfaced, the
-editor scale fix, and end-to-end verification against the real file.
-Wall-clock time wasn't tracked precisely; the work fits inside the brief's
-two-focused-days envelope. Still outstanding: a full Hive Inspect product
-walkthrough (sample inspection through to a published report) and any
-Binsr exploration, and the walkthrough video.
+editor scale fix, exploring Hive's own Spectora importer, and end-to-end
+verification against the real file. Wall-clock time wasn't tracked
+precisely; the work fits inside the brief's two-focused-days envelope.
+Still outstanding: Binsr exploration and the walkthrough video.
