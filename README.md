@@ -4,7 +4,7 @@ Import a Spectora "Export to spreadsheet → Export HTML Text" template into a
 structured, editable database, then edit it or duplicate it without touching
 the original. Built for the Hive Inspect Forward Deployed Engineer take-home.
 
-- **Live app:** (fill in after deploy)
+- **Live app:** https://hive-inspect-template-importer.vercel.app (open, no login required)
 - **Sample input:** [`samples/spectora-export-sample.xlsx`](samples/spectora-export-sample.xlsx) — see [Sample input file](#sample-input-file) below for what it is and why.
 - **Failure-case input:** [`samples/spectora-export-wrong-format.html`](samples/spectora-export-wrong-format.html)
 - **Full context on decisions, cuts, and limitations:** [`NOTES.md`](NOTES.md)
