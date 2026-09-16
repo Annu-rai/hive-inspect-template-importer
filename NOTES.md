@@ -3,22 +3,59 @@
 Context for reviewers: what's cut and why, what's actually supported, how
 it was checked, and time spent. See `README.md` for setup/stack.
 
-## The sample input, honestly
+## The sample input
 
-The brief supplies no template and expects a real Spectora
-"Export to spreadsheet → Export HTML Text" file committed to the repo. That
-signup/export step wasn't completed in this build window, so
-`samples/spectora-export-sample.xlsx` is a **hand-constructed approximation**
-of that export, not a real one — see the header comment in
-`scripts/generate-sample-export.cjs` and the "Sample input file" section of
-`README.md` for exactly what was assumed and why. Every design decision below
-about column names, fill-down behavior, etc. is downstream of that
-assumption and may need adjusting against a real export.
+[`samples/spectora-export-internachi-residential.xls`](samples/spectora-export-internachi-residential.xls)
+is a **real** Spectora export. Signed up for a Spectora free trial, added
+their **"InterNACHI Residential"** template (Template Center → Spectora →
+"based on the InterNACHI Standards of Practice") to the account, and used
+**Templates → ⋮ → Export to spreadsheet → Export HTML Text**. 13 sections,
+69 items, 392 comments.
 
-The importer is deliberately **not** hardcoded to this one file: columns are
-matched by a synonym table (case/whitespace-insensitive), not by fixed
-position or exact header text, and `npm run check-import` exists specifically
-to let a real export be dropped in and checked without touching the DB or UI.
+The parser was first built against a hand-constructed guess at the export
+format (still committed as `samples/spectora-export-constructed-sample.xlsx`,
+now used as the second-file generalization check the brief asks for). Running
+the real file through it was the single most useful thing done on this
+project — it found two real bugs immediately:
+
+1. **Header matching broke on annotated headers.** Spectora's real headers
+   include explanatory text — `"Comment Type (info, limit, defect)"`,
+   `"Recommendation (from list)"` — but the synonym matcher did an exact-string
+   comparison, so neither matched anything. `comment_type` silently stayed
+   null on every row; recommendations never got merged into comment bodies.
+   Fixed by stripping a trailing `"(...)"` annotation before comparing
+   (`normalizeHeader` in `parser.ts`).
+2. **A guessed synonym actively misrouted real data.** The synonym list had
+   `"category"` mapped to the `section` field (a guess, no real export to
+   check it against at the time). Spectora's actual `"Category (-1: Low, 0:
+   Med, 1: High)"` column is a *severity score*, not a section name — after
+   fix #1 stripped its annotation down to `"category"`, it collided directly
+   and got flagged as a duplicate `Section` column, silently discarding a
+   real column. Removed the guess; it's now correctly just an
+   unrecognized-but-visible column.
+
+Everything else about the parser's assumptions held up against the real
+file with no changes needed: the fill-down behavior (section/item names
+only printed on the first row of their group), HTML directly inside the
+comment-text cell, and the sanitizer's link handling — this template has 42
+real `<a href="...">` comments, and every one round-tripped correctly
+(scheme allowed, rewritten to `target="_blank" rel="noopener"`).
+
+**A concrete example of "missing from the export" vs. "unsupported by the
+importer"** (the distinction the brief asks about): one real comment
+("Doorknob Hole") contains `<div class="youtube-embed-wrapper" style="...">
+</div>` — an empty wrapper. Spectora's own spreadsheet export already
+stripped the actual YouTube `<iframe>` out of that div before we ever saw
+the file; there's no video content to lose. Our sanitizer does still flag
+it (`unsupported-styling`, since the wrapper carries an inline `style=`),
+which is correct behavior for the div — but the video itself is missing
+from the *export*, not something our importer failed to support.
+
+Another real example: the "Temperature" comment's `Recommendation (from
+list)` cell literally contains the text `"pro"` — clearly truncated data in
+Spectora's own template. The importer imports it verbatim rather than
+guessing at what it should say. Preserving the customer's actual data,
+oddities included, matters more than silently "fixing" it.
 
 ## Data model
 
@@ -39,143 +76,153 @@ other by construction, not by convention.
 
 The comment body allowlist (`src/lib/importer/sanitize.ts`) is: `p`, `br`,
 `strong`/`b`, `em`/`i`, `u`, `ul`/`ol`/`li`, `span`/`div`, and `a` (href
-restricted to `http`/`https`/`mailto`, and rewritten to open in a new tab).
-That covers the formatting a narrative comment plausibly needs: paragraphs,
-emphasis, lists, links.
+restricted to `http`/`https`/`mailto`, rewritten to open in a new tab). That
+covers what real comments in the InterNACHI template actually use:
+paragraphs, and links (42 of them) to external repair/DIY resources.
 
 Explicitly **not** supported, and never silently dropped — each produces a
 per-comment warning naming the location (`Section > Item > Comment`) and is
 shown in the import summary:
 
-- **Images** (`<img>`) — reference is stripped, surrounding text kept. No
-  asset hosting/rehosting was built; even if the original `src` were kept,
-  it likely points at Spectora's own media store and wouldn't resolve
-  outside it anyway. This is the biggest real content-preservation gap if
-  a real template embeds inline photos in comment text (common in
-  inspection software) — see "Known limitations."
-- **Tables** — structure is flattened, text content is kept as plain text
-  run together (see the "Hairline cracking" sample comment).
-- **Inline `style=` attributes** and any other tag not in the allowlist
-  (`script`, `iframe`, `font`, etc.) — stripped, warned once per comment.
+- **Images** (`<img>`) — reference is stripped, surrounding text kept. Not
+  hit in the real InterNACHI export (zero `<img>` tags in its 392 comments),
+  but exercised via the constructed second sample. No asset hosting/rehosting
+  was built; even if the original `src` were kept, it likely points at
+  Spectora's own media store and wouldn't resolve outside it.
+- **Tables** — structure flattened, text kept. Also not present in the real
+  export; exercised via the constructed sample.
+- **Inline `style=` attributes** and any tag outside the allowlist (`script`,
+  `iframe`, `font`, etc.) — stripped, warned once per comment. Hit for real
+  once, in the YouTube-embed-wrapper case above.
 - **Extra spreadsheet columns** the schema doesn't model — warned once per
-  *column* (with a non-empty cell count), not once per row, so a 500-row
-  file with an unrecognized column doesn't produce 500 warnings.
+  *column* (with a non-empty cell count), not once per row. The real export
+  has nine of these (`Category`, `Multiple Choice Options`, `Unit Type
+  Options`, `Order (w/i item)`, `Answer Type`, `Default Value`, `Default
+  Estimate Min/Max`, `Uses`, `Last Modified`, ten `Default Photo N` slots) —
+  see "Known limitations" for what two of those actually represent.
 
 One exception built in beyond the minimum: a `Recommendation` column (if
 present) isn't dropped — it's appended into the comment's `body_html` as a
-labeled paragraph, because collapsing two closely-related narrative fields
-into one preserves the inspector's words, whereas a schema column we
-weren't sure existed in every export didn't seem worth adding speculatively.
+labeled paragraph. In the real export this fires on real rows (e.g. "Negative
+Grading": the main narrative plus a separate `Recommendation: monitor` cell,
+merged into one comment body).
 
-**Missing from the export vs. unsupported by the importer** — these are
-different failure modes and the importer treats them differently: a blank
-cell (nothing there) is just skipped, no warning. Content that *is* present
-but the importer can't represent (an image, a table, a style attribute, an
-unrecognized column) always produces a warning naming exactly what was
-found and where. The one case that produces neither — genuinely ambiguous
-content — is a row with text but no section context at all (can't happen
-with fill-down unless the *first* data row is missing its section); that's
-treated as a skipped row with a warning, not silently dropped.
+**Missing from the export vs. unsupported by the importer** — different
+failure modes, handled differently: a blank cell is just skipped, no warning.
+Content that *is* present but the importer can't represent (an image, a
+table, a style attribute, an unrecognized column) always produces a warning
+naming exactly what was found and where. See the YouTube-embed example above
+for a case that's genuinely *missing from the export itself*, which the
+importer correctly can't distinguish from "author never added a video" —
+it just has nothing to warn about beyond the leftover empty wrapper it does
+strip.
 
 ## The editor: how far it goes, and why
 
 Section names, item names, and comment names are single-line inline-edit
 (`EditableText`). Comment bodies are edited as raw HTML in a textarea with a
 live rendered preview underneath (`EditableHtml`), sanitized again on save
-through the same allowlist as import — so hand-typed `<script>` or a pasted
-`<table>` gets caught on edit exactly like it would on import.
+through the same allowlist as import.
 
 **Cut deliberately:** a WYSIWYG toolbar (bold/italic/link buttons instead of
 typing tags). A non-technical inspector will find raw HTML tags in a
-textarea unfamiliar, and this is the one place I'd spend the *next* chunk of
-time — see "What I'd do next." It was cut because a minimal, correct
-allowlist-sanitized textarea+preview proves the save/persist path and the
-sanitizer reuse just as well as a rich editor would, for a fraction of the
-time, and getting import right mattered more for this brief than editor
-polish.
+textarea unfamiliar — see "What I'd do next."
 
 Also cut: reordering sections/items/comments, deleting them, and adding new
 ones from scratch. The brief's baseline is "change section names, item
-names, and comment text" — renaming and rewriting, not restructuring. An
-inspector reorganizing a four-year-tuned template is a real need, just not
-one I judged as more valuable than import fidelity in two days.
+names, and comment text" — renaming and rewriting, not restructuring.
 
-## The chosen "go further": making import trustworthy
+## Scale: the actual hard problem in this project
 
-The customer problem: an inspector migrating a template they've tuned for
-years has exactly one thing to verify before they trust the new system —
-*did everything survive, and if not, what didn't?* A silent partial import
-is the worst possible outcome here, worse than a visible failure, because
-it looks like success.
+The real template has 392 comments across 69 items — roughly 880
+independently-editable fields (each with its own name and, for comments, a
+body). Rendering the editor with every one of them mounted as a live
+interactive component made the page unusably slow: hydration alone made
+clicking anything take multiple seconds, and the page was borderline
+unresponsive to browser automation tooling during testing.
 
-So the time went into: every skip/strip/unsupported-content case producing
-a specific, located warning (not a generic "some content was modified"
-banner); an import summary screen showing exact counts (sections/items/
-comments) plus the full warning list before the inspector ever opens the
-template; a hard failure path that creates *nothing* in the DB (verified —
-see below) rather than a half-populated template; and an `import_jobs`
-audit row so that provenance survives past the upload screen. This is also
-why column-not-modeled warnings are deduplicated to one-per-column instead
-of one-per-row — a trustworthy warning list is one a person will actually
-read, which means not drowning the real issues in repetition.
+This was the actual "difficult case" for this project — a hand-built 11-comment
+mock template never would have surfaced it, and the brief's warning that a
+customer's real four-year-tuned template won't be small turned out to be
+exactly right. Fixed by making sections collapse by default
+(`src/components/SectionBlock.tsx`): a collapsed section renders only its
+name and an item/comment count, and only mounts its items/comments (and
+their `EditableText`/`EditableHtml` instances) once expanded. The first
+section opens by default so the page isn't empty on load; the rest are one
+click away. Verified after the fix: expanding a 43-comment section (Plumbing)
+renders instantly, and editing/saving inside it still persists correctly.
+
+This is the improvement referenced as "handle a difficult case well" — it
+wasn't chosen in the abstract, it's a direct fix for a problem the real
+customer file actually caused.
 
 ## Known limitations
 
 - **No image/attachment import.** Flagged, not silently dropped, but not
-  brought in either. See above.
+  brought in either.
+- **`Multiple Choice Options` / `Answer Type` columns aren't modeled.** ~83
+  of the 392 real comments are actually checkbox/dropdown-style question
+  definitions (e.g. "In Attendance" → "Home Owner, Client, Client's Agent,
+  Listing Agent") rather than narrative text — they have no `Comment Text`.
+  These import as comments with the name preserved and an empty body; their
+  options data shows up as a visible "not imported" warning rather than
+  being modeled as real multiple-choice fields. Preserves the hierarchy and
+  is honest about the gap, but a real implementation would likely want a
+  distinct field type here rather than treating everything as a text comment.
+- **`Order (w/i item)` isn't read** — sort order comes from row order in the
+  file instead, which matched this column's values exactly in the real
+  export, but isn't guaranteed to for every export.
 - **No multi-sheet handling beyond "read the first sheet, warn if there are
-  others."** If a real Spectora export splits content across sheets, this
-  importer misses it (with a warning that it did).
-- **20,000 data-row cap** on a single import, as a sanity bound — not
-  tuned against real export sizes since none were available.
+  others."** The real export is single-sheet, so this is unverified against
+  a multi-sheet case.
+- **20,000 data-row cap** on a single import (392 real rows is nowhere near
+  it, but it's an untuned guess, not a measured limit).
 - **No authentication.** The deployed URL is open to anyone who has it.
-  Acceptable for a take-home demo; not acceptable for the real product.
-  The schema has RLS enabled with service-role-only policies as a starting
-  point, but there's no `owner_id`/tenant column yet — see "What I'd do
-  next."
-- **No delete, reorder, or add-new** for sections/items/comments (see
-  editor section above).
-- **Header matching is a synonym guess**, not verified against Spectora's
-  actual column names, because no real export was available. If a real
-  export uses different header text, `npm run check-import` against it will
-  either work or fail loudly ("Could not find a Section or Comment Text
-  column...") — it won't silently misread columns, but the synonym list
-  may need a real entry added.
+  Acceptable for a take-home demo; not acceptable for the real product. The
+  schema has RLS enabled with service-role-only policies as a starting
+  point, but there's no `owner_id`/tenant column yet.
+- **No delete, reorder, or add-new** for sections/items/comments.
+- **Editor scale fix is section-level only.** A single item with an
+  unusually large number of comments would still mount all of them once its
+  section is expanded. Didn't hit this in the real 392-comment file (max
+  was 12 comments in one item), so didn't build item-level lazy-mounting too.
 
 ## What I'd do next (given more time)
 
-1. Get a real Spectora export and re-validate every assumption above
-   against it — this is the single highest-value next step, everything
-   else is downstream of it.
-2. A minimal WYSIWYG toolbar over the same sanitizer, for the
-   non-technical-inspector editing experience.
+1. Model `Multiple Choice Options`/`Answer Type` as real fields instead of
+   text comments with empty bodies — the biggest remaining fidelity gap
+   against the real export.
+2. A minimal WYSIWYG toolbar over the same sanitizer.
 3. Reorder (drag) and delete for sections/items/comments.
 4. Auth + an `owner_id` column so this isn't a single shared workspace.
+5. Try the Room-by-Room Residential and InterNACHI Commercial templates
+   from the same Template Center to see if either breaks a different
+   assumption (multi-choice-heavy content, different column set, etc.).
 
 ## How this was checked
 
-- `npm run check-import` runs the parser (no DB) against both committed
-  samples and prints the full extracted tree plus every warning — this is
-  the fastest way to see parser behavior change, and was run repeatedly
-  while building the parser. It also caught a real bug: item-name fill-down
-  was leaking across section boundaries (an "Electrical" section with no
-  item value was inheriting "Foundation" from the *previous* section's last
-  item instead of falling back to "General") — fixed in `parser.ts`, and
-  the fix is visible in the git history.
-- The full browser flow was driven end-to-end (import the sample file →
-  see the warnings panel → open the template → edit a section name → edit a
-  comment body → duplicate → confirm the original is unchanged and the
-  copy has the edit → hard-reload and re-check the DB directly to confirm
-  edits persisted server-side, not just in client state) before calling any
-  of it done.
+- `npm run check-import` runs the parser (no DB) against all three sample
+  files and prints the full extracted tree plus every warning. Caught two
+  real bugs against the real file (see "The sample input" above) and one
+  earlier bug against the constructed sample: item-name fill-down leaking
+  across section boundaries.
+- The full browser flow was driven end-to-end against the real 392-comment
+  template: import → warnings panel → open the template → expand a section
+  → edit a section name and a comment body → hard-reload and re-check the
+  database directly (not just the UI) to confirm edits persisted → duplicate
+  → confirm the original is unchanged and the copy independently carries the
+  edit.
 - The failure case (`samples/spectora-export-wrong-format.html`, simulating
   someone uploading Spectora's plain-text export instead of the spreadsheet
-  export) was run through the same UI path and confirmed to produce a clear
-  error with zero rows written — verified directly against the database,
-  not just the UI response.
+  export) produces a clear error with zero rows written — verified directly
+  against the database.
+- The scale fix was verified by measuring: before the `SectionBlock` change,
+  opening the real template made the page unresponsive; after, expanding a
+  43-comment section renders and becomes editable effectively instantly, and
+  a comment-name edit inside it round-tripped to the database correctly.
 - A hydration mismatch (`toLocaleString()` defaulting to different locales
   on the server vs. the browser) was caught from the Next.js dev-overlay
-  error badge during manual testing and fixed by pinning an explicit locale.
+  error badge and fixed by pinning an explicit locale.
 - `npm run build` (production build, typechecked) passes clean.
 
 ## Credits / starting point
@@ -192,8 +239,10 @@ not the outdated/unpatched npm package — see README), `sanitize-html`,
 
 Built in a single extended AI-pair-programming session (Claude Code):
 schema + migration, parser + sanitizer, server actions, editor/import UI,
-Supabase provisioning, end-to-end browser verification, and this
-documentation. Wall-clock time wasn't tracked precisely; the work fits
-comfortably inside the brief's two-focused-days envelope, with the
-Spectora/Hive/Binsr product exploration and the real export file (see
-above) still outstanding.
+Supabase provisioning, Vercel deployment, Hive Inspect + Spectora trial
+signups, the real Spectora export and the two bug fixes it surfaced, the
+editor scale fix, and end-to-end verification against the real file.
+Wall-clock time wasn't tracked precisely; the work fits inside the brief's
+two-focused-days envelope. Still outstanding: a full Hive Inspect product
+walkthrough (sample inspection through to a published report) and any
+Binsr exploration, and the walkthrough video.
