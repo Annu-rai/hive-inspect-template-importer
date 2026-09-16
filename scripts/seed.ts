@@ -19,7 +19,7 @@ if (existsSync(path.join(__dirname, "..", ".env.local"))) {
   config();
 }
 
-const SAMPLE_FILE = "spectora-export-sample.xlsx";
+const SAMPLE_FILE = "spectora-export-internachi-residential.xls";
 
 function toArrayBuffer(buf: Buffer): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
@@ -59,7 +59,7 @@ async function main() {
   const { data: template, error: templateErr } = await db
     .from("templates")
     .insert({
-      name: "InterNACHI Residential (sample)",
+      name: "InterNACHI Residential",
       description: `Seeded from ${SAMPLE_FILE}`,
       origin: "import",
     })

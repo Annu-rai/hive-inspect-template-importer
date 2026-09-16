@@ -42,5 +42,6 @@ function run(fileName: string) {
   }
 }
 
-run("spectora-export-sample.xlsx");
+run("spectora-export-internachi-residential.xls");
+run("spectora-export-constructed-sample.xlsx");
 run("spectora-export-wrong-format.html");
