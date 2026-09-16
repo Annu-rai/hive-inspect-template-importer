@@ -40,7 +40,7 @@ export type ParseResult = ParseSuccess | ParseFailure;
  * merged into the wrong field.
  */
 const HEADER_SYNONYMS: Record<string, string[]> = {
-  section: ["section", "section name", "category"],
+  section: ["section", "section name"],
   item: ["item", "item name", "component", "sub-item"],
   commentName: ["comment name", "comment title", "library comment", "comment"],
   commentText: [
@@ -56,7 +56,15 @@ const HEADER_SYNONYMS: Record<string, string[]> = {
 };
 
 function normalizeHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/\s+/g, " ");
+  return h
+    .trim()
+    // Spectora appends explanatory annotations to some headers, e.g.
+    // "Comment Type (info, limit, defect)" or "Recommendation (from list)".
+    // Strip a trailing "(...)" before matching so these still resolve.
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 function matchHeader(h: string): string | null {
