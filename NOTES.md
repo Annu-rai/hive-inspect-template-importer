@@ -232,6 +232,51 @@ exploration. Two things worth being direct about:
   already shows a report in "Published" status, which is what's shown in the
   video instead.
 
+## Using Binsr (optional comparison)
+
+Signed up for Binsr's free trial and tried its template importer against
+the same real InterNACHI Residential file, for comparison.
+
+**Binsr's approach is structurally different from Spectora/Hive's.** Where
+Hive's importer asks which competitor a file came from (Spectora, HIP,
+HomeGauge, Horizon) and applies source-specific column mapping, Binsr offers
+two general-purpose paths for *any* CSV/Excel: an "AI-Powered Import" that
+lets an LLM infer the structure, and a "Manual CSV Import" described
+explicitly as "no AI, fully deterministic — full mapping control." Offering
+a non-AI fallback alongside the AI one, with that framing, is a real
+trust-conscious design choice — it's solving the same problem this
+project's "go further" chose to solve, from a different angle. Binsr also
+gates the AI import behind an explicit "I confirm that I own or have
+authorization to use this template" checkbox before processing, which
+neither Spectora nor Hive's flow has.
+
+**Result quality, checked directly against this project's own output:**
+ran the real file through Binsr's AI-Powered Import and the counts matched
+this project's parser exactly at every level — 13 sections, 69 line items,
+392 comments overall, and section-by-section (Exterior: 7 items/50 comments,
+Roof: 5/35, Plumbing: 7/43, all identical) and item-by-item (Siding,
+Flashing & Trim: 12 comments, matching exactly). Spot-checked several
+comment bodies against the source spreadsheet cell-for-cell — narrative
+text came through verbatim, no paraphrasing or invented content. One real
+advantage over this project: Binsr's AI correctly modeled the multiple-choice
+question rows (e.g. "Siding Material") as actual Checklist-type fields with
+their option lists intact, rather than importing them as text comments with
+an empty body and a discarded options column — exactly the gap called out
+in "Known limitations" above.
+
+Two independent implementations — this project's deterministic parser and
+Binsr's LLM-based one — reaching identical structural counts on the same
+392-row real-world file is reassuring evidence for both: it suggests the
+file's structure is unambiguous enough that a well-built importer, AI or
+not, should get it right.
+
+One UI rough edge, minor compared to Hive's: the "Generate AI Strategy"
+button click didn't visibly advance the step tracker at first, though the
+underlying API call (`/api/migration/template`, confirmed via the network
+tab) had already returned 200 — unlike Hive's case, there was still a
+pending request in flight the whole time, so this reads as "slow AI
+processing with laggy UI feedback," not a stuck/broken state.
+
 ## How this was checked
 
 - `npm run check-import` runs the parser (no DB) against all three sample
